@@ -1,4 +1,21 @@
 {
+  "name": "biometric-attendance-server",
+  "version": "1.0.0",
+  "description": "Middleware server for ZKTeco, Biomax, and FK-Series biometric attendance devices using Node.js and Firebase.",
+  "main": "attendance-device-punch-logs.js",
+  "keywords": [
+    "biometric",
+    "attendance",
+    "zkteco",
+    "biomax",
+    "adms",
+    "middleware",
+    "firebase",
+    "nodejs",
+    "iot",
+    "attendance-server"
+  ],
+  "author": "CryptoMaN-Rahul",
   "dependencies": {
     "body-parser": "^2.2.1",
     "express": "^5.2.1",
