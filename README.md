@@ -57,7 +57,7 @@ Many biometric devices use a variation of the ADMS/FK protocol which communicate
 
 1. **Clone the repository:**
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/CryptoMaN-Rahul/biometric-attendance-server-nodejs
    cd biometric-attendance-server
    ```
 
