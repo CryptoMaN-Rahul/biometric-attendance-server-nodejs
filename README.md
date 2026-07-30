@@ -53,6 +53,70 @@ Many biometric devices use a variation of the ADMS/FK protocol which communicate
 
 ---
 
+---
+
+## 🔀 EBKN FkWeb Variant (Secureye S-FB6K / S-FB3K, Realand BIOFACE M60/M61BH)
+
+A second FK-family device (`fk_bin_data_lib: M50`, firmware `M60 v3.16.1286s`) turned out to speak a **different** dialect from the `FKDataHS102` variant above. Reference handler: [`ebkn-fkweb-handler.js`](ebkn-fkweb-handler.js).
+
+| | FKDataHS102 (above) | EBKN FkWeb |
+|---|---|---|
+| Request line | `POST /hdata.aspx` | `POST http://<host> HTTP/1.0` — **absolute URI, no path** |
+| Identifies itself via | `cmd_id` header | `request_code` / `dev_id` / `trans_id` headers |
+| Ack shape | text body `OK` / `result=OK` | **empty body**, `response_code: OK` as a **response header** |
+| Command channel | none | `receive_cmd` — device polls every ~3s, bidirectional |
+
+### The bug that cost the most time: reverse proxies eat the identity headers
+
+The device was sending a perfectly correct request the entire time — a `tcpdump -i any -A "tcp port 80 and host <device-ip>"` capture proved it:
+
+```
+POST http://<server> HTTP/1.0
+Content-Type: application/octet-stream
+request_code: receive_cmd
+dev_id: 102026020002170
+trans_id: 330
+Content-Length: 171
+
+{"fk_name":"M60","fk_time":"...","fk_info":{...,"fk_bin_data_lib":"M50","firmware":"M60 v3.16.1286s"}}
+```
+
+But behind an Nginx/Caddy reverse proxy, the app only ever saw `host`, `content-type`, `content-length` — **`request_code`, `dev_id`, and `trans_id` were silently gone.** Both proxies strip headers containing underscores by default (Nginx needs `underscore_in_headers on;`; Caddy has no equivalent directive at all — tested by mirroring the raw header into a synthetic response header and it arrived empty, proving the proxy never parses it in the first place).
+
+Symptom if you hit this: every request looks like `UNKNOWN` protocol, the device gets a random fallback ID instead of its real serial, and you can't tell a punch from a heartbeat.
+
+**Fix:** don't proxy this device. Terminate its connection directly in the app (bind `:80` yourself, or run it on a dedicated port and NAT that port straight to the app, bypassing the proxy layer).
+
+### `request_code` values observed
+
+| `request_code` | Meaning | Ack |
+|---|---|---|
+| `realtime_glog` | attendance punch | ack only |
+| `realtime_enroll_data` | user push (name, privilege) — arrives as one JSON block + ~30 pure-binary continuation blocks (template + a JFIF photo). This is the **only** channel that carries the user's name | ack only |
+| `receive_cmd` | device polling for work, ~3s interval | ack, or inject a queued command |
+| `send_cmd_result` | device reporting `cmd_return_code` for a command you injected | ack only |
+
+Body framing is `4-byte little-endian length prefix + JSON + binary blobs` — extracting JSON by matching the last `}` in the payload breaks on `realtime_enroll_data`, because that lands inside the binary tail. Scan brace depth instead (see `extractJson` in the reference handler).
+
+### Command injection
+
+Reply to a `receive_cmd` poll with a non-empty `cmd_code` header to make the device execute it:
+
+```js
+commandQueue.push({ cmd_code: 'GET_USER_ID_LIST' });
+commandQueue.push({ cmd_code: 'SET_TIME', body: { time: '20260730164712' } }); // YYYYMMDDHHMMSS
+```
+
+`GET_USER_ID_LIST`, `GET_USER_INFO`, `GET_DEVICE_STATUS`, `GET_LOG_DATA`, and `SET_TIME` are confirmed working. `OPEN_DOOR` is recognized but its body shape is unsolved (`ERROR_INVALID_PARAM` on every variant tried).
+
+> 💀 **`CLEAR_ENROLL_DATA` / `CLEAR_LOG_DATA` / `CLEAR_ALL_ADMIN` take an empty body, execute instantly, and are irreversible.** Never queue them to probe what they do.
+
+### PIN format
+
+`user_id` arrives zero-padded to 8 digits (`"00000001"`). If you're mapping to an external system by PIN, normalize it (`String(Number(userId))`) — the padded and unpadded forms will not match.
+
+---
+
 ## 📦 Installation
 
 1. **Clone the repository:**
